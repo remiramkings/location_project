@@ -136,13 +136,13 @@ class MyAppState extends State<MyApp> {
       home: Scaffold(
         appBar: AppBar(
             title: const Text('BackgroundFetch Example',
-                style: TextStyle(color: Colors.black)),
-            backgroundColor: Colors.amberAccent,
+                style: TextStyle(color: Color.fromARGB(255, 21, 21, 21))),
+            backgroundColor: Color.fromARGB(255, 165, 214, 255),
             actions: <Widget>[
               Switch(value: _enabled, onChanged: _onClickEnable),
             ]),
         body: Container(
-          color: Colors.black,
+          color: Colors.white,
           child: ListView.builder(
               itemCount: _events.length,
               itemBuilder: (BuildContext context, int index) {
@@ -152,7 +152,7 @@ class MyAppState extends State<MyApp> {
                         contentPadding:
                             EdgeInsets.only(left: 10.0, top: 10.0, bottom: 0.0),
                         labelStyle: TextStyle(
-                            color: Colors.amberAccent, fontSize: 20.0),
+                            color: Colors.blue, fontSize: 20.0),
                         labelText: "[background fetch event]"),
                     child: Text(timestamp.toString(),
                         style: const TextStyle(
