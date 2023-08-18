@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:background_fetch/background_fetch.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:intl/intl.dart';
+import 'package:location_project/models/distance_delegate_model.dart';
+import 'package:location_project/models/location_model.dart';
 import 'package:location_project/services/location_upload_service.dart';
+import 'package:location_project/services/notification.dart';
+import 'package:location_project/services/shared_preference_service.dart';
 import 'package:location_project/user_location.dart';
 
 import 'services/location_service.dart';
@@ -14,25 +19,41 @@ import 'services/location_service.dart';
 void backgroundFetchHeadlessTask(HeadlessTask task) async {
   String taskId = task.taskId;
   bool isTimeout = task.timeout;
+  CustomNotification notification = CustomNotification();
   if (isTimeout) {
     // This task has exceeded its allowed running-time.
     // You must stop what you're doing and immediately .finish(taskId)
     print("[BackgroundFetch] Headless task timed-out: $taskId");
+    notification.showNotificationText('IsTimedOut');
     BackgroundFetch.finish(taskId);
     return;
   }
   print('[BackgroundFetch] Headless event received.');
-  //  Position position = await LocationService.getCurrentLocation();
-  //     String? placeMarks =
-  //         await LocationService.getAddressFromLocation(position);
+  notification.showNotificationText('eventReceived');
+  Position position = await LocationService.getCurrentLocation();
+      String? placeMarks =
+          await LocationService.getAddressFromLocation(position);
+      print('#######DATA###########${position.latitude} ${position.longitude}');
+       notification.showNotificationText('UserLoc:###########');
 
-      print('Debug: Tracking user location: ${ 'dummy position'/*position.toString()*/}');
-      UserLocation userLocation = UserLocation(
-          latitude: 11.1111, // position.latitude,
-          longitude: 78.8888, // position.longitude,
-          timeStamp: DateTime.now(),
-          place: /*placeMarks ?? */'Place not available');
-      await LocationUploadService.getInstance().upload(userLocation);
+      LocationModel currentLocation = LocationModel(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          timestamp: DateTime.now());
+
+      DistanceDelegateModel distanceDelegate = await LocationService.getInstance()
+          .isLocationChangedForDistance(currentLocation, distanceInMeters: 10);
+      notification.showNotificationText('$distanceDelegate');
+      if (distanceDelegate.canUpload) {
+        UserLocation userLocation = UserLocation(
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+            timeStamp: currentLocation.timestamp,
+            place: placeMarks ?? 'Place not available');
+        await LocationUploadService.getInstance().upload(userLocation);
+        notification.showNotificationText('Com ${userLocation.timeStamp}');
+      }
+      notification.showNotificationText('Finished');
   BackgroundFetch.finish(taskId);
 }
 
@@ -58,10 +79,16 @@ class MyAppState extends State<MyApp> {
   int _status = 0;
   final List<DateTime> _events = [];
 
+  Timer? timer;
+  DateFormat dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
+
+  DistanceDelegateModel? distanceDelegateModel;
+
   @override
   void initState() {
     super.initState();
     initPlatformState();
+    //trackDistance();
   }
 
   // Platform messages are asynchronous, so we initialize in an async method.
@@ -105,6 +132,36 @@ class MyAppState extends State<MyApp> {
     if (!mounted) return;
   }
 
+  Future<void> trackDistance() async {
+    Timer.periodic(Duration(seconds: 5), (timer) async {
+      Position position = await LocationService.getCurrentLocation();
+      String? placeMarks =
+          await LocationService.getAddressFromLocation(position);
+      print('#######DATA###########${position.latitude} ${position.longitude}');
+
+      LocationModel currentLocation = LocationModel(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          timestamp: DateTime.now());
+
+      var distanceDelegate = await LocationService.getInstance()
+          .isLocationChangedForDistance(currentLocation, distanceInMeters: 10);
+
+      setState(() {
+        distanceDelegateModel = distanceDelegate;
+      });
+
+      if (distanceDelegateModel!.canUpload) {
+        UserLocation userLocation = UserLocation(
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+            timeStamp: currentLocation.timestamp,
+            place: placeMarks ?? 'Place not available');
+        await LocationUploadService.getInstance().upload(userLocation);
+      }
+    });
+  }
+
   void _onClickEnable(enabled) {
     if (enabled) {
       BackgroundFetch.start().then((int status) {
@@ -131,6 +188,14 @@ class MyAppState extends State<MyApp> {
   }
 
   @override
+  void dispose() {
+    if (timer != null) {
+      timer!.cancel();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
@@ -143,21 +208,49 @@ class MyAppState extends State<MyApp> {
             ]),
         body: Container(
           color: Colors.white,
-          child: ListView.builder(
-              itemCount: _events.length,
-              itemBuilder: (BuildContext context, int index) {
-                DateTime timestamp = _events[index];
-                return InputDecorator(
-                    decoration: const InputDecoration(
-                        contentPadding:
-                            EdgeInsets.only(left: 10.0, top: 10.0, bottom: 0.0),
-                        labelStyle: TextStyle(
-                            color: Colors.blue, fontSize: 20.0),
-                        labelText: "[background fetch event]"),
-                    child: Text(timestamp.toString(),
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 16.0)));
-              }),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Text('Distance: '),
+                  Expanded(
+                    flex: 1,
+                    child: Text(distanceDelegateModel != null
+                        ? '${distanceDelegateModel!.distance.toStringAsFixed(3)} meters'
+                        : 'Nothing'),
+                  )
+                ],
+              ),
+              Row(
+                children: [
+                  Text('Can upload: (${dateFormat.format(DateTime.now())}) '),
+                  Expanded(
+                    flex: 1,
+                    child: Text(distanceDelegateModel != null
+                        ? '${distanceDelegateModel!.canUpload}'
+                        : 'Nothing'),
+                  )
+                ],
+              ),
+              Flexible(
+                child: ListView.builder(
+                    itemCount: _events.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      DateTime timestamp = _events[index];
+                      return InputDecorator(
+                          decoration: const InputDecoration(
+                              contentPadding: EdgeInsets.only(
+                                  left: 10.0, top: 10.0, bottom: 0.0),
+                              labelStyle:
+                                  TextStyle(color: Colors.blue, fontSize: 20.0),
+                              labelText: "[background fetch event]"),
+                          child: Text(timestamp.toString(),
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 16.0)));
+                    }),
+              ),
+            ],
+          ),
         ),
         bottomNavigationBar: BottomAppBar(
             child: Row(children: <Widget>[
